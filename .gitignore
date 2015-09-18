@@ -1,7 +1,13 @@
+# Java & Scala
 *.class
-*.log
+*.jar
+*.war
+*.ear
 
-# sbt specific
+# Maven
+target/
+
+# SBT
 .cache
 .history
 .lib/
@@ -12,6 +18,14 @@ src_managed/
 project/boot/
 project/plugins/project/
 
-# Scala-IDE specific
-.scala_dependencies
-.worksheet
+# JetBrains
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Mac OS X
+.DS_Store
+
+# Other stuff
+*.log
