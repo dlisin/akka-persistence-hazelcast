@@ -2,8 +2,8 @@ package akka.persistence.hazelcast
 
 import akka.actor._
 import akka.event.Logging
-import com.hazelcast.config.{ClasspathXmlConfig, Config}
-import com.hazelcast.core.{Hazelcast, IMap}
+import com.hazelcast.config._
+import com.hazelcast.core._
 
 object HazelcastExtension extends ExtensionId[HazelcastExtension] with ExtensionIdProvider {
 
@@ -20,10 +20,10 @@ object HazelcastExtension extends ExtensionId[HazelcastExtension] with Extension
 class HazelcastExtension(system: ExtendedActorSystem) extends Extension {
 
   private val logger = Logging.getLogger(system, this)
-  private val extensionConfig = system.settings.config.getConfig("akka.persistence.hazelcast")
+  private val config = system.settings.config.getConfig("akka.persistence.hazelcast")
 
   private val hazelcastInstance = {
-    val hazelcastConfigFile = extensionConfig.getString("config-file")
+    val hazelcastConfigFile = config.getString("config-file")
 
     logger.info(s"Using configuration file: '$hazelcastConfigFile'.")
     val hazelcastConfig: Config = new ClasspathXmlConfig(hazelcastConfigFile)

@@ -3,10 +3,12 @@ package akka.persistence.hazelcast.journal
 import akka.actor.ActorLogging
 import akka.persistence.hazelcast.HazelcastExtension
 import akka.persistence.hazelcast.journal.HazelcastJournal.{Message, MessageId}
+import akka.persistence.hazelcast.journal.util.{HighestSequenceNrExtractor, HighestSequenceNrPredicate}
 import akka.persistence.journal.AsyncWriteJournal
 import akka.persistence.{AtomicWrite, PersistentRepr}
 import akka.serialization.SerializationExtension
 import com.hazelcast.core.IMap
+import com.hazelcast.mapreduce.aggregation.{Aggregations, Supplier}
 
 import scala.collection.immutable.Seq
 import scala.concurrent.Future
@@ -15,11 +17,11 @@ import scala.util.Try
 
 private[hazelcast] object HazelcastJournal {
 
-  final case class MessageId(persistenceId: String, sequenceNumber: Long) extends Serializable
+  final case class MessageId(persistenceId: String, sequenceNr: Long) extends Serializable
 
-  final case class Message(persistenceId: String, sequenceNumber: Long, payload: Array[Byte]) extends Serializable {
+  final case class Message(persistenceId: String, sequenceNr: Long, payload: Array[Byte]) extends Serializable {
     def this(messageId: MessageId, payload: Array[Byte]) = {
-      this(persistenceId = messageId.persistenceId, sequenceNumber = messageId.sequenceNumber, payload)
+      this(persistenceId = messageId.persistenceId, sequenceNr = messageId.sequenceNr, payload)
     }
   }
 
@@ -30,11 +32,12 @@ class HazelcastJournal extends AsyncWriteJournal with ActorLogging
   with PersistenceIdSubscribersTrait
   with TagSubscribersTrait {
 
-  private val config = context.system.settings.config.getConfig("hazelcast-journal")
+  private val config = context.system.settings.config.getConfig("akka.persistence.hazelcast-journal")
 
   private val serialization = SerializationExtension(context.system)
   private val hazelcast = HazelcastExtension.get(context.system)
 
+  private val replayDispatcher = context.system.dispatchers.lookup(config.getString("replay-dispatcher"))
   private val journalMap: IMap[MessageId, Message] = hazelcast.getMap(config.getString("map"))
 
   /**
@@ -59,11 +62,21 @@ class HazelcastJournal extends AsyncWriteJournal with ActorLogging
     * Asynchronously reads the highest stored sequence number for the given `persistenceId`.
     * The persistent actor will use the highest sequence number after recovery as the starting point when persisting new events.
     */
-  override def asyncReadHighestSequenceNr(persistenceId: String, fromSequenceNr: Long): Future[Long] = {
-    log.debug(s"asyncReadHighestSequenceNr(persistenceId: '$persistenceId', fromSequenceNr: '$fromSequenceNr')")
+  override def asyncReadHighestSequenceNr(persistenceId: String, fromSequenceNr: Long): Future[Long] = Future {
+    log.debug(s"Reading highest sequence number for persistenceId '$persistenceId' starting from '$fromSequenceNr'")
 
-    throw new UnsupportedOperationException("Not implemented")
-  }
+    val predicate = new HighestSequenceNrPredicate(persistenceId, fromSequenceNr)
+    val highestSequenceNr = journalMap.aggregate(
+      Supplier.fromPredicate(predicate,
+        Supplier.all(new HighestSequenceNrExtractor)), Aggregations.longMax()).toLong match {
+      case Long.MinValue
+        if journalMap.keySet(predicate).isEmpty => 0L
+      case other => other
+    }
+
+    log.debug(s"Highest sequence number for persistenceId '$persistenceId' starting from '$fromSequenceNr' is '$highestSequenceNr'")
+    highestSequenceNr
+  } (replayDispatcher)
 
   /**
     * Asynchronously replays persistent messages. Implementations replay a message by calling `replayCallback`.
@@ -80,7 +93,5 @@ class HazelcastJournal extends AsyncWriteJournal with ActorLogging
 
   protected def persistentFromBytes(a: Array[Byte]): PersistentRepr = serialization.deserialize(a, classOf[PersistentRepr]).get
 
-
 }
-
 
